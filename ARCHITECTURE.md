@@ -110,6 +110,7 @@ DELETE /api/signing-requests/{id}
 POST   /api/signing-requests/{id}/send          ← triggers OpenSign if enabled
 POST   /api/signing-requests/{id}/remind        ← sends OpenSign reminder
 POST   /api/signing-requests/{id}/mark-signed   ← manual override
+GET    /api/signing-requests/{id}/export-pdf    ← download signed form as PDF
 
 POST   /api/signing-requests/webhooks/opensign  ← receives OpenSign callbacks
 
@@ -174,9 +175,22 @@ In **auth mode** (`PORTAL_AUTH_ENABLED=true`), passwords are bcrypt-hashed and s
 
 ## PDF handling
 
+### Uploaded info sheets
+
 Uploaded PDFs are stored in `/data/pdfs/` inside the backend container, which maps to the `pdf_data` Docker volume. Files are named with a UUID to avoid collisions.
 
-The `GET /api/forms/{id}/pdf` endpoint streams the file via FastAPI's `FileResponse`. The nginx proxy passes this through to the browser. PDFs are served inline so browsers open them directly rather than downloading.
+The `GET /api/forms/{id}/pdf` endpoint streams the file via FastAPI's `FileResponse`. The nginx proxy passes this through to the browser.
+
+### Signed form export
+
+`GET /api/signing-requests/{id}/export-pdf` generates a PDF on the fly using **ReportLab** (for the record page) and **pypdf** (for merging). The output is:
+
+1. **Page 1+: Record page** — form name, description, scout/guardian details table, date signed, and the drawn signature image rendered at full size.
+2. **Appended: info sheet pages** — if the form template has a PDF attached, all its pages are appended after the record page.
+
+The combined PDF is streamed back as a download with a descriptive filename (`ScoutName_FormName_signed.pdf`). Nothing is written to disk — it's generated in memory and discarded after sending.
+
+The admin **View** button on signed requests opens a modal showing the signature image inline. **Download PDF** triggers the export endpoint directly via an `<a download>` link — no JavaScript blob handling needed.
 
 ---
 

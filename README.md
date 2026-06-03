@@ -5,9 +5,11 @@ A self-hosted web app for managing scout group consent forms and tracking digita
 ## What it does
 
 - Manage scout groups, individual scouts, and their parents/guardians
-- Create consent form templates (with optional PDF attachments)
+- Create consent form templates with optional PDF info sheet attachments
 - Issue signing requests to guardians and track their status
 - Guardian-facing signing portal with a drawn signature pad
+- View signed forms including the captured signature image
+- Export signed forms as a PDF — signature record + appended info sheet in one file
 - Optional integration with [OpenSign](https://opensignlabs.com) for email-delivered e-signatures
 - Dashboard with live completion stats
 
@@ -19,6 +21,7 @@ A self-hosted web app for managing scout group consent forms and tracking digita
 | Database | PostgreSQL 16 |
 | ORM | SQLAlchemy 2 (async) |
 | Frontend | React 18 + Vite + Tailwind CSS |
+| PDF generation | ReportLab + pypdf |
 | Serving | nginx (frontend) + uvicorn (API) |
 | Deployment | Docker Compose |
 

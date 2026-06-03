@@ -1,4 +1,6 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -6,6 +8,9 @@ from datetime import datetime, timezone
 from app.database import get_db
 from app import models, schemas
 from app.services.opensign import opensign
+from app.services.pdf_generator import generate_signed_form_pdf
+
+PDF_DIR = os.getenv("PDF_DIR", "/data/pdfs")
 
 router = APIRouter(prefix="/api/signing-requests", tags=["signing-requests"])
 
@@ -59,9 +64,29 @@ async def create_signing_request(body: schemas.SigningRequestCreate, db: AsyncSe
     return req
 
 
-@router.get("/{req_id}", response_model=schemas.SigningRequestDetail)
+@router.get("/{req_id}", response_model=schemas.SigningRequestFull)
 async def get_signing_request(req_id: int, db: AsyncSession = Depends(get_db)):
     return await _load_request(db, req_id)
+
+
+@router.get("/{req_id}/export-pdf")
+async def export_pdf(req_id: int, db: AsyncSession = Depends(get_db)):
+    """Generate and download a PDF record of a signed consent form."""
+    req = await _load_request(db, req_id)
+    if req.status != "signed":
+        raise HTTPException(status_code=400, detail="Only signed forms can be exported")
+
+    pdf_bytes = generate_signed_form_pdf(req, PDF_DIR)
+
+    scout_name = f"{req.scout.first_name}_{req.scout.last_name}" if req.scout else "scout"
+    form_name = req.form_template.name.replace(" ", "_") if req.form_template else "consent"
+    filename = f"{scout_name}_{form_name}_signed.pdf"
+
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.put("/{req_id}", response_model=schemas.SigningRequest)

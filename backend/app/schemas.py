@@ -145,6 +145,10 @@ class SigningRequestDetail(SigningRequest):
     guardian: Optional[Guardian] = None
     form_template: Optional[FormTemplate] = None
 
+class SigningRequestFull(SigningRequestDetail):
+    """Single-item response that includes the signature image data."""
+    signature_data: Optional[str] = None
+
 
 # ── Portal ─────────────────────────────────────────────────────────────────────
 

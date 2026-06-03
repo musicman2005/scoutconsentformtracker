@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import axios from "axios";
 import {
   getSigningRequests, createSigningRequest, deleteSigningRequest,
   sendSigningRequest, sendReminder, markSigned,
@@ -7,6 +8,104 @@ import {
 } from "../api";
 import StatusBadge from "../components/StatusBadge";
 import Modal from "../components/Modal";
+
+// ── Signed form viewer ────────────────────────────────────────────────────────
+
+function SignedFormModal({ requestId, onClose }) {
+  const { data: req, isLoading, error } = useQuery({
+    queryKey: ["signing-request", requestId],
+    queryFn: () => axios.get(`/api/signing-requests/${requestId}`).then((r) => r.data),
+  });
+
+  return (
+    <Modal title="Signed Consent Form" onClose={onClose}>
+      {isLoading && <p className="text-gray-400 text-sm py-4">Loading…</p>}
+      {error && <p className="text-red-500 text-sm py-4">Failed to load.</p>}
+      {req && (
+        <div className="space-y-4">
+          {/* Form info */}
+          <div>
+            <h3 className="font-semibold text-gray-900">{req.form_template?.name}</h3>
+            {req.form_template?.description && (
+              <p className="text-sm text-gray-500 mt-0.5">{req.form_template.description}</p>
+            )}
+          </div>
+
+          {/* Details grid */}
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm bg-gray-50 rounded-lg p-4">
+            <div>
+              <dt className="text-gray-500 text-xs uppercase tracking-wide">Scout</dt>
+              <dd className="font-medium mt-0.5">{req.scout ? `${req.scout.first_name} ${req.scout.last_name}` : "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 text-xs uppercase tracking-wide">Guardian</dt>
+              <dd className="font-medium mt-0.5">{req.guardian ? `${req.guardian.first_name} ${req.guardian.last_name}` : "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 text-xs uppercase tracking-wide">Email</dt>
+              <dd className="mt-0.5">{req.guardian?.email ?? "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 text-xs uppercase tracking-wide">Relationship</dt>
+              <dd className="mt-0.5">{req.guardian?.relationship_to_scout ?? "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 text-xs uppercase tracking-wide">Date Signed</dt>
+              <dd className="mt-0.5 text-green-700 font-medium">
+                {req.signed_at ? new Date(req.signed_at).toLocaleString() : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 text-xs uppercase tracking-wide">Signed By</dt>
+              <dd className="mt-0.5">{req.signed_by_name ?? "—"}</dd>
+            </div>
+          </dl>
+
+          {/* Signature image */}
+          {req.signature_data ? (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Signature</p>
+              <div className="border border-gray-200 rounded-lg bg-white p-2 inline-block">
+                <img
+                  src={req.signature_data}
+                  alt="Signature"
+                  className="max-h-28 max-w-full"
+                />
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-400 italic">No digital signature — marked signed manually.</p>
+          )}
+
+          {/* Actions */}
+          <div className="flex gap-2 pt-2 border-t">
+            <a
+              href={`/api/signing-requests/${requestId}/export-pdf`}
+              download
+              className="btn-primary"
+            >
+              Download PDF
+            </a>
+            {req.form_template?.pdf_filename && (
+              <a
+                href={`/api/forms/${req.form_template_id}/pdf`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-secondary"
+              >
+                View Info Sheet
+              </a>
+            )}
+            <button className="btn-secondary ml-auto" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+
+// ── Create request form ───────────────────────────────────────────────────────
 
 function CreateRequestForm({ scouts, guardians, forms, onSubmit, onCancel }) {
   const [form, setForm] = useState({ scout_id: "", guardian_id: "", form_template_id: "", notes: "" });
@@ -17,10 +116,16 @@ function CreateRequestForm({ scouts, guardians, forms, onSubmit, onCancel }) {
     : guardians;
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); onSubmit({ ...form, scout_id: Number(form.scout_id), guardian_id: Number(form.guardian_id), form_template_id: Number(form.form_template_id) }); }} className="space-y-4">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit({ ...form, scout_id: Number(form.scout_id), guardian_id: Number(form.guardian_id), form_template_id: Number(form.form_template_id) });
+      }}
+      className="space-y-4"
+    >
       <div>
         <label className="label">Scout *</label>
-        <select className="input" value={form.scout_id} onChange={(e) => { set("scout_id")(e); setForm((f) => ({ ...f, guardian_id: "", scout_id: e.target.value })); }} required>
+        <select className="input" value={form.scout_id} onChange={(e) => setForm((f) => ({ ...f, scout_id: e.target.value, guardian_id: "" }))} required>
           <option value="">Select scout…</option>
           {scouts.map((s) => <option key={s.id} value={s.id}>{s.first_name} {s.last_name}</option>)}
         </select>
@@ -54,11 +159,15 @@ function CreateRequestForm({ scouts, guardians, forms, onSubmit, onCancel }) {
   );
 }
 
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
 const STATUS_FILTERS = ["all", "pending", "sent", "signed", "declined"];
 
 export default function SigningRequests() {
   const qc = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
+  const [viewingId, setViewingId] = useState(null);
   const [filter, setFilter] = useState("all");
   const [actionError, setActionError] = useState("");
 
@@ -71,12 +180,7 @@ export default function SigningRequests() {
 
   const create = useMutation({ mutationFn: createSigningRequest, onSuccess: () => { invalidate(); setShowCreate(false); } });
   const remove = useMutation({ mutationFn: deleteSigningRequest, onSuccess: invalidate });
-
-  const sendMutation = useMutation({
-    mutationFn: sendSigningRequest,
-    onSuccess: invalidate,
-    onError: (e) => setActionError(e.response?.data?.detail ?? "Send failed"),
-  });
+  const sendMutation = useMutation({ mutationFn: sendSigningRequest, onSuccess: invalidate, onError: (e) => setActionError(e.response?.data?.detail ?? "Send failed") });
   const remindMutation = useMutation({ mutationFn: sendReminder, onSuccess: invalidate });
   const signMutation = useMutation({ mutationFn: markSigned, onSuccess: invalidate });
 
@@ -92,7 +196,7 @@ export default function SigningRequests() {
       </div>
 
       {/* Status filter tabs */}
-      <div className="flex gap-1 mb-4">
+      <div className="flex gap-1 mb-4 flex-wrap">
         {STATUS_FILTERS.map((s) => (
           <button
             key={s}
@@ -156,10 +260,17 @@ export default function SigningRequests() {
                   </td>
                   <td className="table-cell">
                     <div className="flex gap-1 flex-wrap">
+                      {r.status === "signed" && (
+                        <>
+                          <button className="btn-secondary btn-sm" onClick={() => setViewingId(r.id)}>View</button>
+                          <a href={`/api/signing-requests/${r.id}/export-pdf`} download className="btn-secondary btn-sm">PDF</a>
+                        </>
+                      )}
                       {r.status === "pending" && (
-                        <button className="btn-primary btn-sm" onClick={() => sendMutation.mutate(r.id)} disabled={sendMutation.isPending}>
-                          Send
-                        </button>
+                        <>
+                          <button className="btn-primary btn-sm" onClick={() => sendMutation.mutate(r.id)} disabled={sendMutation.isPending}>Send</button>
+                          <button className="btn-secondary btn-sm" onClick={() => signMutation.mutate(r.id)}>Mark Signed</button>
+                        </>
                       )}
                       {r.status === "sent" && (
                         <>
@@ -167,11 +278,8 @@ export default function SigningRequests() {
                           <button className="btn-primary btn-sm" onClick={() => signMutation.mutate(r.id)}>Mark Signed</button>
                         </>
                       )}
-                      {r.status === "pending" && (
-                        <button className="btn-secondary btn-sm" onClick={() => signMutation.mutate(r.id)}>Mark Signed</button>
-                      )}
                       {r.opensign_sign_url && (
-                        <a href={r.opensign_sign_url} target="_blank" rel="noopener noreferrer" className="btn-secondary btn-sm">View Link</a>
+                        <a href={r.opensign_sign_url} target="_blank" rel="noopener noreferrer" className="btn-secondary btn-sm">Sign Link</a>
                       )}
                       <button className="btn-danger btn-sm" onClick={() => { if (confirm("Delete this request?")) remove.mutate(r.id); }}>
                         Delete
@@ -187,16 +295,12 @@ export default function SigningRequests() {
 
       {showCreate && (
         <Modal title="New Signing Request" onClose={() => setShowCreate(false)}>
-          <CreateRequestForm
-            scouts={scouts}
-            guardians={guardians}
-            forms={forms}
-            onSubmit={(data) => create.mutate(data)}
-            onCancel={() => setShowCreate(false)}
-          />
+          <CreateRequestForm scouts={scouts} guardians={guardians} forms={forms} onSubmit={(data) => create.mutate(data)} onCancel={() => setShowCreate(false)} />
           {create.isError && <p className="text-red-500 text-sm mt-2">{create.error?.response?.data?.detail ?? "Failed to create"}</p>}
         </Modal>
       )}
+
+      {viewingId && <SignedFormModal requestId={viewingId} onClose={() => setViewingId(null)} />}
     </div>
   );
 }
